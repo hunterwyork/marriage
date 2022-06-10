@@ -1,0 +1,225 @@
+---
+title: "explore"
+author: "Hunter York"
+date: "06/12/2021"
+output: pdf_document
+---
+
+## Introduction
+
+```{r}
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(haven)
+library(foreign)
+library(easyPSID)
+
+#convert dat to rds
+#files_list <- list.files("../data", full.names = T)
+# dir.create("../data/rds_files/")
+# getwd()
+
+# for (fi in files_list){
+#   convert_to_rds(
+#     in_direc=fi,
+#     out_direc="../data/rds_files/"
+#   )
+# }
+
+# loop over files and read in only germane variables
+
+#files_list <- list.files("../data/rds_files_renamed_fam_vars/", full.names = T)
+
+
+
+# get_vars <- function(fi, vars){
+#   print(fi)
+#   temp_data <-  readRDS(fi) %>% 
+#     data.table()
+#   temp = data.table(vars = vars)
+#   vars_inc = vars[vars %in% names(temp_data)]
+#   temp[vars %in% vars_inc, tstrsplit(fi, "/")[[5]] := vars]
+#   return(temp)
+# }
+# 
+# vars = c("V3", # family number
+#          "V117", # Age of head
+#          "V118", # age of wife
+#          "V119", # sex of head
+#          "V197_A", # occ head
+#          "V197_B", # ind head
+#          "V243_A", # occ wife
+#          "V243_B", # ind wife
+#          paste0("V", 198:238))
+# 
+# temp <- lapply(files_list, get_vars, vars = vars)
+# 
+# rbindlist(temp, fill = T) %>% 
+#   melt(id.var = "vars") %>% 
+#   .[!is.na(value)] %>%
+#   dcast(vars ~ variable) -> temp
+# 
+# #fwrite(temp, "../sup/var_names.csv")
+# 
+# var_names <- read.csv("../sup/var_names_manual.csv", na.strings = c("NA", "")) %>% data.table
+# 
+# 
+# 
+# get_filer <- function(fi, var_names){
+#   print(fi)
+#   tstrsplit(fi, "/")[[5]] -> fi_sub
+#   temp <- var_names[,.SD, .SDcols = c("vars", fi_sub)]
+#   temp_data <-  readRDS(fi) %>% 
+#     data.table()
+#   temp_data <- temp_data[,.SD,.SDcols = temp[!is.na(get(fi_sub)),get(fi_sub)]]
+#   setnames(temp_data,  temp[!is.na(get(fi_sub)),get(fi_sub)],  temp[!is.na(get(fi_sub)),vars])
+#   return(temp_data)
+# }
+# 
+# 
+# 
+# data_appended <- lapply(files_list[1:10], get_filer, var_names = var_names) %>% rbindlist(., fill = T)
+# 
+# setnames(data_appended, var_names[, vars], var_names[, tolower(gsub(" ", "_", Description))])
+```
+
+#
+
+```{r}
+dir.create("../data/prepped_longitude/")
+easyPSID::create_custom_panel(c(paste0("ER", 21118:21280), "ER21004", "ER21017", "ER21018", "ER21009", "ER21007", "ER21002"), "../data/rds_files/", "../data/prepped_longitude/")
+```
+
+# 
+
+```{r}
+longi <- readRDS("../data/prepped_longitude/PSID Panel.rds") %>% data.table()
+longi <- longi[Year >= 2003]
+longi <- longi[,.SD, .SDcols = colSums(longi) %>% .[!is.na(.)] %>%  names()]
+temp <- easyPSID::find_description(names(longi)) %>% data.table(., stringsAsFactors = F) %>%
+  .[!is.na(Description),Description] %>% as.character() %>% gsub(" ", "_", .)
+setnames(longi,colnames(longi), c(temp, "year"))
+```
+
+#
+
+```{r}
+dat <- copy(longi)
+dat[, lead_family_composition_change := lead(FAMILY_COMPOSITION_CHANGE), by = .(`1968_FAMILY_IDENTIFIER`)]
+# dat <- dat[FAMILY_COMPOSITION_CHANGE %in% c(0,1,2)|lead_family_composition_change %in% c(0,1,2)]
+
+
+# job start and end
+dat[, job_1_start := as.Date(paste0("01-", `BC6_BEGINNING_MONTH--JOB_1`, "-",`BC6_BEGINNING_YEAR--JOB_1`), "%d-%m-%Y")]
+dat[, job_1_end := as.Date(paste0("01-", `BC6_ENDING_MONTH--JOB_1`, "-",`BC6_ENDING_YEAR--JOB_1`), "%d-%m-%Y")]
+dat[, job_1_occ := `BC20_MAIN_OCC_FOR_JOB_1:_2000_CODE_(HD)`]
+dat[, job_1_ind := `BC21_MAIN_IND_FOR_JOB_1:_2000_CODE_(HD)`]
+dat[, job_1_sal_amt := `BC46_AMOUNT_EARNED_LAST_YEAR--JOB_1`]
+dat[, job_1_sal_per_what := `BC46_PER_FOR_AMT_EARNED_LAST_YR--JOB_1`]
+dat[, job_1_why_end := `BC51_WHY_LAST_JOB_END_(HD-U)`]
+
+# job start and end job 2-4
+for (i in 2:4){
+  dat[, paste0("job_", i, "_start") := as.Date(paste0("01-", get(paste0("BC6_BEGINNING_MONTH--JOB_",i)), "-",get(paste0("BC6_BEGINNING_YEAR--JOB_",i))), "%d-%m-%Y")]
+  dat[, paste0("job_", i, "_end") := as.Date(paste0("01-", get(paste0("BC6_ENDING_MONTH--JOB_",i)), "-",get(paste0("BC6_ENDING_YEAR--JOB_",i))), "%d-%m-%Y")]
+  dat[,  paste0("job_", i, "_occ") := get(paste0("BC20_MAIN_OCC_FOR_JOB_",i,":_2000_CODE_(HD)"))]
+  dat[,  paste0("job_", i, "_ind") := get(paste0("BC21_MAIN_IND_FOR_JOB_",i,":_2000_CODE_(HD)"))]
+  
+  dat[,  paste0("job_", i, "_sal_amt") := get(paste0("BC46_AMOUNT_EARNED_LAST_YEAR--JOB_", i))]
+  dat[,  paste0("job_", i, "_sal_per_what") := get(paste0("BC46_PER_FOR_AMT_EARNED_LAST_YR--JOB_", i))]
+  dat[,  paste0("job_", i, "_why_end") := get(paste0("BC51_WHY_JOB_ENDED--JOB_", i))]
+}
+
+dat <- dat[,.SD, .SDcols = names(dat)[names(dat) %like% "job_|CURRENT_STATE|AGE_OF_HEAD|SEX_OF_HEAD|FAMILY_ID|FAMILY_COMPOSITION|year|lead_family|FAMILY_INTERVIEW"]]
+
+```
+
+```{r}
+# load family ties and merge on
+fam_ties <- readRDS("../data/rds_files/MX119.rds") %>% data.table()
+fam_ties <- fam_ties[MX7 %in% c(1, 10)]
+fam_ties <- fam_ties[,.SD, .SDcols = paste0("MX", c(2,3,5,6))]
+setnames(fam_ties, c("MX2","MX3", "MX5", "MX6"), c("year", "family_interview_number", "family_number_1968", "ind_unique_id"))
+fam_ties[, ind_unique_id := paste0(family_number_1968, "_", ind_unique_id)]
+
+temp <- c("year", "family_interview_number", "family_number_1968", "ind_unique_id")
+fam_ties[,(temp) := lapply(.SD, as.character), .SDcols = temp]
+
+fam_ties <- unique(fam_ties)
+
+temp <- c("year", "2003_FAMILY_INTERVIEW_(ID)_NUMBER", "1968_FAMILY_IDENTIFIER")
+dat[,(temp) := lapply(.SD, as.character), .SDcols = temp]
+
+
+ind_file <- readRDS("../data/rds_files/IND2019.rds") %>% data.table()
+
+temp <- easyPSID::find_description(names(ind_file)) %>% data.table(., stringsAsFactors = F) %>%
+  .[!is.na(Description) & !is.na(Variable)]
+temp[, Description := gsub(" ", "_", Description)]
+
+temp <- temp[Description %like% "PERSON_NUMBER|INTERVIEW_NUMBER|TO_HEAD"]
+
+ind_file <- ind_file[,.SD, .SDcols = as.character(temp$Variable)]
+setnames(ind_file,  as.character(temp$Variable),  as.character(temp$Description))
+
+ind_file[,seq_id := 1:nrow(ind_file)]
+
+# keeps <- ind_file[,any(.SD == 10), .SDcols = names(ind_file)[names(ind_file) %like% "TO_HEAD"], by = seq_id]
+
+ind_file <- ind_file[keeps$V1 ==TRUE]
+
+
+
+ind_file %>%  melt(., measure.vars = patterns(int_no = "_INTERVIEW_NUMBER", rel_head = "RELATION_TO_HEAD|RELATIONSHIP_TO_HEAD"), id.vars = c("1968_INTERVIEW_NUMBER", "seq_id")) -> ind_file_long_temp
+
+ind_file %>%  melt(., measure.vars = patterns(int_no = "_INTERVIEW_NUMBER"), id.vars = c("1968_INTERVIEW_NUMBER", "seq_id")) -> ind_file_long
+
+ind_file_long[, rel_to_head := ind_file_long_temp$rel_head]
+ind_file_long <- ind_file_long[value != 0 & rel_to_head %in% c(1,10) ]
+
+ind_file_long[, year := substr(variable, 1,4)]
+ind_file_long[,`1968_INTERVIEW_NUMBER` := as.character(`1968_INTERVIEW_NUMBER`)]
+ind_file_long[, family_interview_id := as.character(value)]
+
+dat <- merge(dat, ind_file_long[,.(`1968_INTERVIEW_NUMBER`,
+                                   family_interview_id,
+                                   year, seq_id)], by.x = c("1968_FAMILY_IDENTIFIER",
+                                                            "2003_FAMILY_INTERVIEW_(ID)_NUMBER",
+                                                            "year"), 
+             by.y = c("1968_INTERVIEW_NUMBER", "family_interview_id", "year"))
+
+# dat_keyed <-  merge(dat, unique(fam_ties), by.x = c("year", "2003_FAMILY_INTERVIEW_(ID)_NUMBER", "1968_FAMILY_IDENTIFIER"),
+#              by.y = c("year", "family_interview_number", "family_number_1968"), all.x  = T)
+```
+
+
+```{r}
+job_getter <- function(c.seq_id, data){
+  job_iter <- 0
+  jobs <- data.table()
+  for(c.year in sort(unique(data[seq_id == c.seq_id, year]))){
+    for(i in 1:4){
+      temp <- data[seq_id == c.seq_id & year == c.year, 
+                   .SD,
+                   .SDcols = c(paste0("job_", i,
+                                      c("_occ", "_ind", "_sal_amt",
+                                        "_sal_per_what",
+                                        "_why_end",
+                                        "_start", 
+                                        "_end")),
+                               "year", "seq_id")]
+      if(temp[, get(paste0("job_", i, "_occ")) != 0]){
+        job_iter <- job_iter + 1
+        temp[, job_id := job_iter]
+        setnames(temp, c("occ", "ind", "sal_amt", "sal_per_what", "why_end","start", "end", "year", "seq_id", "job_id"))
+        jobs <- rbind(jobs, temp)
+      }
+    }
+    
+  }
+  return(jobs)
+}
+
+lapply(unique(dat$seq_id)[1:20], job_getter, dat) %>% rbindlist() -> out
+```
